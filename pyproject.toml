@@ -1,0 +1,7 @@
+[project]
+name = "pytorch-srgan-sisr-df2k-ost"
+version = "0.1.0"
+description = "PyTorch Super Resolution Generative Adversarial Network trained on the DF2K_OST dataset"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
