@@ -6,7 +6,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from config import create_logger
-from utils import transform_image
+from utils import create_hr_and_lr_imgs
 
 logger = create_logger("INFO", __file__)
 
@@ -23,7 +23,7 @@ class SRDataset(Dataset):
         self.scaling_factor = scaling_factor
         self.crop_size = crop_size
         self.test_mode = test_mode
-        self.images = []
+        self.imgs = []
 
         data_path = Path(data_path)
 
@@ -33,40 +33,40 @@ class SRDataset(Dataset):
 
         if data_path.is_dir():
             logger.info(f'Creating dataset from directory ("{data_path}")...')
-            image_paths = list(data_path.iterdir())
+            img_paths = list(data_path.iterdir())
         elif data_path.is_file():
             logger.info(f'Creating dataset from file ("{data_path}")...')
             try:
                 with open(data_path, "r") as f:
-                    image_paths = [Path(line.strip()) for line in f.readlines() if line]
+                    img_paths = [Path(line.strip()) for line in f.readlines() if line]
             except FileNotFoundError:
-                logger.error(f'File with images list was not found ("{data_path}")')
+                logger.error(f'File with imgs list was not found ("{data_path}")')
 
         try:
-            for image_path in image_paths:
-                if image_path.suffix.lower() in (".jpg", ".jpeg", ".png"):
-                    with Image.open(image_path) as img:
+            for img_path in img_paths:
+                if img_path.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    with Image.open(img_path) as img:
                         if img.mode == "RGB":
                             if test_mode:
-                                self.images.append(image_path)
+                                self.imgs.append(img_path)
                             else:
                                 width, height = img.size
                                 if width >= self.crop_size and height >= self.crop_size:
-                                    self.images.append(image_path)
+                                    self.imgs.append(img_path)
         except FileNotFoundError:
-            logger.error(f'Image at path "{image_path}" was not found, skipping...')
+            logger.error(f'Image at path "{img_path}" was not found, skipping...')
 
         if dev_mode:
-            self.images = self.images[: int(len(self.images) * 0.1)]
+            self.imgs = self.imgs[: int(len(self.imgs) * 0.1)]
 
-        print(type(self.images[342]))
+        print(type(self.imgs[342]))
 
     def __len__(self) -> int:
-        return len(self.images)
+        return len(self.imgs)
 
     def __getitem__(self, i: int) -> tuple[Tensor, Tensor]:
-        return transform_image(
-            image_path=self.images[i],
+        return create_hr_and_lr_imgs(
+            img_path=self.imgs[i],
             scaling_factor=self.scaling_factor,
             crop_size=self.crop_size,
             test_mode=self.test_mode,
