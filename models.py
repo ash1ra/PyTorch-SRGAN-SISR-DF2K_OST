@@ -2,8 +2,8 @@ import math
 from typing import Literal
 
 from torch import Tensor, nn
+from torchvision.models import VGG19_Weights, vgg19
 from torchvision.transforms import Normalize
-from torchvision.models import vgg19, VGG19_Weights
 
 from config import create_logger
 
@@ -213,7 +213,7 @@ class Discriminator(nn.Module):
         return self.layers(x)
 
 
-class TruncatedVGG(nn.Module):
+class TruncatedVGG19(nn.Module):
     def __init__(self):
         super().__init__()
 

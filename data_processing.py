@@ -59,8 +59,6 @@ class SRDataset(Dataset):
         if dev_mode:
             self.imgs = self.imgs[: int(len(self.imgs) * 0.1)]
 
-        print(type(self.imgs[342]))
-
     def __len__(self) -> int:
         return len(self.imgs)
 
