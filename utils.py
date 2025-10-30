@@ -1,6 +1,5 @@
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -8,7 +7,7 @@ import torch
 from safetensors.torch import load_file, save_file
 from torch import Tensor, nn, optim
 from torch.amp import GradScaler
-from torch.optim.lr_scheduler import OneCycleLR
+from torch.optim.lr_scheduler import MultiStepLR
 from torchvision.io import decode_image
 from torchvision.transforms import v2 as transforms
 
@@ -23,8 +22,8 @@ class Metrics:
     generator_train_losses: list[float] = field(default_factory=list)
     discriminator_train_losses: list[float] = field(default_factory=list)
     generator_val_losses: list[float] = field(default_factory=list)
-    generator_psnrs: list[float] = field(default_factory=list)
-    generator_ssims: list[float] = field(default_factory=list)
+    generator_val_psnrs: list[float] = field(default_factory=list)
+    generator_val_ssims: list[float] = field(default_factory=list)
 
 
 logger = create_logger("INFO", __file__)
@@ -198,12 +197,11 @@ def save_checkpoint(
     discriminator_optimizer: optim.Optimizer,
     metrics: Metrics,
     generator_scaler: GradScaler | None = None,
-    generator_scheduler: OneCycleLR | None = None,
     discriminator_scaler: GradScaler | None = None,
-    discriminator_scheduler: OneCycleLR | None = None,
+    generator_scheduler: MultiStepLR | None = None,
+    discriminator_scheduler: MultiStepLR | None = None,
 ) -> None:
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    checkpoint_dir_path = Path(checkpoints_dir_path) / f"checkpoint_{timestamp}"
+    checkpoint_dir_path = Path(checkpoints_dir_path) / "srgan_checkpoint"
     checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
 
     save_file(generator.state_dict(), checkpoint_dir_path / "generator.safetensors")
@@ -256,9 +254,9 @@ def load_checkpoint(
     discriminator_optimizer: optim.Optimizer,
     metrics: Metrics,
     generator_scaler: GradScaler | None = None,
-    generator_scheduler: OneCycleLR | None = None,
     discriminator_scaler: GradScaler | None = None,
-    discriminator_scheduler: OneCycleLR | None = None,
+    generator_scheduler: MultiStepLR | None = None,
+    discriminator_scheduler: MultiStepLR | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
 ) -> int:
     checkpoints_dir_path = Path(checkpoints_dir_path)
@@ -293,8 +291,8 @@ def load_checkpoint(
         metrics.generator_train_losses = metrics_dict["generator_train_losses"]
         metrics.discriminator_train_losses = metrics_dict["discriminator_train_losses"]
         metrics.generator_val_losses = metrics_dict["generator_val_losses"]
-        metrics.generator_psnrs = metrics_dict["generator_psnrs"]
-        metrics.generator_ssims = metrics_dict["generator_ssims"]
+        metrics.generator_val_psnrs = metrics_dict["generator_val_psnrs"]
+        metrics.generator_val_ssims = metrics_dict["generator_val_ssims"]
 
     if generator_scaler and full_metadata["generator_scaler_state_dict"]:
         generator_scaler.load_state_dict(full_metadata["generator_scaler_state_dict"])
@@ -333,3 +331,14 @@ def load_checkpoint(
     logger.info(f'Checkpoint was loaded from "{checkpoints_dir_path}"')
 
     return full_metadata["epoch"]
+
+
+def format_time(total_seconds: float) -> str:
+    if total_seconds < 0:
+        total_seconds = 0
+
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = int(total_seconds % 60)
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
