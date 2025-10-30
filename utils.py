@@ -18,11 +18,13 @@ from config import create_logger
 @dataclass
 class Metrics:
     epochs: int = field(default=0)
-    learning_rates: list[float] = field(default_factory=list)
-    train_losses: list[float] = field(default_factory=list)
-    val_losses: list[float] = field(default_factory=list)
-    psnrs: list[float] = field(default_factory=list)
-    ssims: list[float] = field(default_factory=list)
+    generator_learning_rates: list[float] = field(default_factory=list)
+    discriminator_learning_rates: list[float] = field(default_factory=list)
+    generator_train_losses: list[float] = field(default_factory=list)
+    discriminator_train_losses: list[float] = field(default_factory=list)
+    generator_val_losses: list[float] = field(default_factory=list)
+    generator_psnrs: list[float] = field(default_factory=list)
+    generator_ssims: list[float] = field(default_factory=list)
 
 
 logger = create_logger("INFO", __file__)
@@ -96,133 +98,238 @@ def create_hr_and_lr_imgs(
     return hr_img_tensor, lr_img_tensor
 
 
-def save_checkpoint(
-    checkpoints_dir_path: str | Path,
-    epoch: int,
-    model: nn.Module,
+def _save_optimizer_state(
     optimizer: optim.Optimizer,
-    metrics: Metrics,
-    scaler: GradScaler | None = None,
-    scheduler: OneCycleLR | None = None,
-) -> None:
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    checkpoint_dir_path = Path(checkpoints_dir_path) / f"checkpoint_{timestamp}"
-    checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
-
-    save_file(model.state_dict(), checkpoint_dir_path / "model.safetensors")
+    checkpoint_dir_path: str | Path,
+    prefix: str,
+) -> dict:
+    checkpoint_dir_path = Path(checkpoint_dir_path)
 
     optimizer_state = optimizer.state_dict()
     optimizer_tensors = {}
-    optimizer_metadata = {}
-
-    optimizer_metadata["param_groups"] = optimizer_state["param_groups"]
+    optimizer_metadata = {"param_groups": optimizer_state["param_groups"]}
 
     optimizer_state_buffers = optimizer_state["state"]
     optimizer_metadata["state"] = {}
 
     for param_id, buffers in optimizer_state_buffers.items():
-        param_id = str(param_id)
-        optimizer_metadata["state"][param_id] = {}
+        param_id_str = str(param_id)
+        optimizer_metadata["state"][param_id_str] = {}
 
         for buffer_name, value in buffers.items():
             if isinstance(value, torch.Tensor):
-                tensor_key = f"state_{param_id}_{buffer_name}"
+                tensor_key = f"state_{param_id_str}_{buffer_name}"
                 optimizer_tensors[tensor_key] = value
             else:
-                optimizer_metadata["state"][param_id][buffer_name] = value
+                optimizer_metadata["state"][param_id_str][buffer_name] = value
 
     if optimizer_tensors:
-        save_file(optimizer_tensors, checkpoint_dir_path / "optimizer.safetensors")
+        save_file(
+            optimizer_tensors, checkpoint_dir_path / f"{prefix}_optimizer.safetensors"
+        )
 
-    full_metadata = {
-        "epoch": epoch,
-        "metrics": asdict(metrics),
-        "optimizer_metadata": optimizer_metadata,
-        "scaler_state_dict": scaler.state_dict() if scaler else None,
-        "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
-    }
-
-    with open(checkpoint_dir_path / "training_state.json", "w") as f:
-        json.dump(full_metadata, f, indent=4)
-
-    logger.info(f'Checkpoint was saved at "{checkpoint_dir_path}" after {epoch} epoch')
+    return optimizer_metadata
 
 
-def load_checkpoint(
-    checkpoints_dir_path: str | Path,
-    model: nn.Module,
+def _load_optimizer_state(
     optimizer: optim.Optimizer,
-    metrics: Metrics | None = None,
-    scaler: GradScaler | None = None,
-    scheduler: OneCycleLR | None = None,
-    device: Literal["cuda", "cpu"] = "cpu",
-) -> int:
+    checkpoints_dir_path: str | Path,
+    prefix: str,
+    full_metadata: dict,
+    device: str,
+) -> None:
     checkpoints_dir_path = Path(checkpoints_dir_path)
 
-    model_path = checkpoints_dir_path / "model.safetensors"
-    state_path = checkpoints_dir_path / "training_state.json"
-
-    if not model_path.exists() or not state_path.exists():
-        logger.info(
-            'Checkpoint was not found at "{checkpoints_dir_path}", starting from 1 epoch'
+    optimizer_metadata_key = f"{prefix}_optimizer_metadata"
+    if optimizer_metadata_key not in full_metadata:
+        logger.warning(
+            f"Metadata for '{optimizer_metadata_key}' not found in training_state.json"
         )
-        return 1
+        return
 
-    model.load_state_dict(load_file(filename=model_path, device=device))
+    optimizer_metadata = full_metadata[optimizer_metadata_key]
 
-    with open("state_path", "r") as f:
-        full_metadata = json.load(f)
-
-    if metrics and "metrics" in full_metadata:
-        metrics_dict = full_metadata["metrics"]
-        metrics.epochs = metrics_dict["epochs"]
-        metrics.learning_rates = metrics_dict["learning_rates"]
-        metrics.train_losses = metrics_dict["train_losses"]
-        metrics.val_losses = metrics_dict["val_losses"]
-        metrics.psnrs = metrics_dict["psnrs"]
-        metrics.ssims = metrics_dict["ssims"]
-
-    if scaler and full_metadata["scaler_state_dict"]:
-        scaler.load_state_dict(full_metadata["scaler_state_dict"])
-
-    if scheduler and full_metadata["scheduler_state_dict"]:
-        scheduler.load_state_dict(full_metadata["scheduler_state_dict"])
-
-    optimizer_tensors_path = checkpoints_dir_path / "optimizer.safetensors"
-
+    optimizer_tensors_path = checkpoints_dir_path / f"{prefix}_optimizer.safetensors"
     if optimizer_tensors_path.exists():
         optimizer_tensors = load_file(filename=optimizer_tensors_path, device=device)
     else:
         optimizer_tensors = {}
-
-    optimizer_metadata = full_metadata["optimizer_metadata"]
+        logger.warning(f"Optimizer tensor file not found: {optimizer_tensors_path}")
 
     optimizer_state_buffers = {
         int(param_id): buffers
         for param_id, buffers in optimizer_metadata["state"].items()
     }
 
-    for param_id, buffers in optimizer_state_buffers.items():
-        param_id = str(param_id)
+    for tensor_key, tensor_value in optimizer_tensors.items():
+        parts = tensor_key.split("_")
+        if len(parts) < 3 or parts[0] != "state":
+            logger.warning(
+                f"Unrecognized tensor key in {prefix}_optimizer: {tensor_key}"
+            )
+            continue
 
-        for buffer_name in list(buffers.keys()):
-            tensor_key = f"state_{param_id}_{buffer_name}"
-            if tensor_key in optimizer_tensors:
-                buffers[buffer_name] = optimizer_tensors[tensor_key]
+        param_id = int(parts[1])
+        buffer_name = "_".join(parts[2:])
 
-        for tensor_key, tensor_value in optimizer_tensors.items():
-            if tensor_key.startswith(f"state_{param_id}_"):
-                original_buffer_name = tensor_key[len(f"state_{param_id}_") :]
-                if original_buffer_name not in buffers:
-                    buffers[original_buffer_name] = tensor_value
+        if param_id not in optimizer_state_buffers:
+            optimizer_state_buffers[param_id] = {}
+
+        optimizer_state_buffers[param_id][buffer_name] = tensor_value
 
     optimizer_state_to_load = {
         "param_groups": optimizer_metadata["param_groups"],
         "state": optimizer_state_buffers,
     }
 
-    optimizer.load_state_dict(optimizer_state_to_load)
+    try:
+        optimizer.load_state_dict(optimizer_state_to_load)
+    except Exception as e:
+        logger.error(f"Failed to load state_dict for {prefix}_optimizer: {e}")
+        logger.warning(f"Continuing without loading {prefix}_optimizer state.")
 
-    logger.info('Checkpoint was loaded from "{checkpoints_dir_path}"')
+
+def save_checkpoint(
+    checkpoints_dir_path: str | Path,
+    epoch: int,
+    generator: nn.Module,
+    discriminator: nn.Module,
+    generator_optimizer: optim.Optimizer,
+    discriminator_optimizer: optim.Optimizer,
+    metrics: Metrics,
+    generator_scaler: GradScaler | None = None,
+    generator_scheduler: OneCycleLR | None = None,
+    discriminator_scaler: GradScaler | None = None,
+    discriminator_scheduler: OneCycleLR | None = None,
+) -> None:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    checkpoint_dir_path = Path(checkpoints_dir_path) / f"checkpoint_{timestamp}"
+    checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
+
+    save_file(generator.state_dict(), checkpoint_dir_path / "generator.safetensors")
+    save_file(
+        discriminator.state_dict(), checkpoint_dir_path / "discriminator.safetensors"
+    )
+
+    generator_optimizer_metadata = _save_optimizer_state(
+        generator_optimizer,
+        checkpoint_dir_path,
+        "generator",
+    )
+
+    discriminator_optimizer_metadata = _save_optimizer_state(
+        discriminator_optimizer,
+        checkpoint_dir_path,
+        "discriminator",
+    )
+
+    full_metadata = {
+        "epoch": epoch,
+        "metrics": asdict(metrics),
+        "generator_optimizer_metadata": generator_optimizer_metadata,
+        "discriminator_optimizer_metadata": discriminator_optimizer_metadata,
+        "generator_scaler_state_dict": generator_scaler.state_dict()
+        if generator_scaler
+        else None,
+        "discriminator_scaler_state_dict": discriminator_scaler.state_dict()
+        if discriminator_scaler
+        else None,
+        "generator_scheduler_state_dict": generator_scheduler.state_dict()
+        if generator_scheduler
+        else None,
+        "discriminator_scheduler_state_dict": discriminator_scheduler.state_dict()
+        if discriminator_scheduler
+        else None,
+    }
+
+    with open(checkpoint_dir_path / "training_state.json", "w") as f:
+        json.dump(full_metadata, f, indent=4)
+
+    logger.info(f'Checkpoint was saved to "{checkpoint_dir_path}" after {epoch} epoch')
+
+
+def load_checkpoint(
+    checkpoints_dir_path: str | Path,
+    generator: nn.Module,
+    discriminator: nn.Module,
+    generator_optimizer: optim.Optimizer,
+    discriminator_optimizer: optim.Optimizer,
+    metrics: Metrics,
+    generator_scaler: GradScaler | None = None,
+    generator_scheduler: OneCycleLR | None = None,
+    discriminator_scaler: GradScaler | None = None,
+    discriminator_scheduler: OneCycleLR | None = None,
+    device: Literal["cuda", "cpu"] = "cpu",
+) -> int:
+    checkpoints_dir_path = Path(checkpoints_dir_path)
+
+    generator_path = checkpoints_dir_path / "generator.safetensors"
+    discriminator_path = checkpoints_dir_path / "discriminator.safetensors"
+    state_path = checkpoints_dir_path / "training_state.json"
+
+    if (
+        not generator_path.exists()
+        or not discriminator_path.exists()
+        or not state_path.exists()
+    ):
+        logger.info(
+            f'Checkpoint was not found at "{checkpoints_dir_path}", starting from 1 epoch'
+        )
+        return 1
+
+    generator.load_state_dict(load_file(filename=generator_path, device=device))
+    discriminator.load_state_dict(load_file(filename=discriminator_path, device=device))
+
+    with open(state_path, "r") as f:
+        full_metadata = json.load(f)
+
+    if metrics and "metrics" in full_metadata:
+        metrics_dict = full_metadata["metrics"]
+        metrics.epochs = metrics_dict["epochs"]
+        metrics.generator_learning_rates = metrics_dict["generator_learning_rates"]
+        metrics.discriminator_learning_rates = metrics_dict[
+            "discriminator_learning_rates"
+        ]
+        metrics.generator_train_losses = metrics_dict["generator_train_losses"]
+        metrics.discriminator_train_losses = metrics_dict["discriminator_train_losses"]
+        metrics.generator_val_losses = metrics_dict["generator_val_losses"]
+        metrics.generator_psnrs = metrics_dict["generator_psnrs"]
+        metrics.generator_ssims = metrics_dict["generator_ssims"]
+
+    if generator_scaler and full_metadata["generator_scaler_state_dict"]:
+        generator_scaler.load_state_dict(full_metadata["generator_scaler_state_dict"])
+
+    if discriminator_scaler and full_metadata["discriminator_scaler_state_dict"]:
+        discriminator_scaler.load_state_dict(
+            full_metadata["discriminator_scaler_state_dict"]
+        )
+
+    if generator_scheduler and full_metadata["generator_scheduler_state_dict"]:
+        generator_scheduler.load_state_dict(
+            full_metadata["generator_scheduler_state_dict"]
+        )
+
+    if discriminator_scheduler and full_metadata["discriminator_scheduler_state_dict"]:
+        discriminator_scheduler.load_state_dict(
+            full_metadata["discriminator_scheduler_state_dict"]
+        )
+
+    _load_optimizer_state(
+        generator_optimizer,
+        checkpoints_dir_path,
+        "generator",
+        full_metadata,
+        device,
+    )
+
+    _load_optimizer_state(
+        discriminator_optimizer,
+        checkpoints_dir_path,
+        "discriminator",
+        full_metadata,
+        device,
+    )
+
+    logger.info(f'Checkpoint was loaded from "{checkpoints_dir_path}"')
 
     return full_metadata["epoch"]
