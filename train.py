@@ -12,6 +12,7 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 import config
 from data_processing import SRDataset
 from models import Discriminator, Generator, TruncatedVGG19
+from plots import plot_training_metrics
 from utils import Metrics, format_time, load_checkpoint, rgb_to_ycbcr, save_checkpoint
 
 logger = config.create_logger("INFO", __file__)
@@ -277,6 +278,8 @@ def train(
                 generator_scheduler=generator_scheduler,
                 discriminator_scheduler=discriminator_scheduler,
             )
+
+        plot_training_metrics(metrics, "")
 
     except KeyboardInterrupt:
         logger.info("Saving model's weights and finish training...")

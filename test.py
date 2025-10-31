@@ -20,7 +20,6 @@ def test_step(
     content_loss_fn: nn.Module,
     psnr_metric: PeakSignalNoiseRatio,
     ssim_metric: StructuralSimilarityIndexMeasure,
-    use_tta: bool = True,
     device: Literal["cuda", "cpu"] = "cpu",
 ) -> tuple[float, float, float]:
     total_content_loss = 0.0
@@ -110,7 +109,6 @@ def main() -> None:
             content_loss_fn=content_loss_fn,
             psnr_metric=psnr_metric,
             ssim_metric=ssim_metric,
-            use_tta=False,
             device=device,
         )
 
