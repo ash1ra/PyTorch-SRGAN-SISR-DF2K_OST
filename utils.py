@@ -132,12 +132,12 @@ def _save_optimizer_state(
 
 def _load_optimizer_state(
     optimizer: optim.Optimizer,
-    checkpoints_dir_path: str | Path,
+    checkpoint_dir_path: str | Path,
     prefix: str,
     full_metadata: dict,
     device: str,
 ) -> None:
-    checkpoints_dir_path = Path(checkpoints_dir_path)
+    checkpoint_dir_path = Path(checkpoint_dir_path)
 
     optimizer_metadata_key = f"{prefix}_optimizer_metadata"
     if optimizer_metadata_key not in full_metadata:
@@ -148,7 +148,7 @@ def _load_optimizer_state(
 
     optimizer_metadata = full_metadata[optimizer_metadata_key]
 
-    optimizer_tensors_path = checkpoints_dir_path / f"{prefix}_optimizer.safetensors"
+    optimizer_tensors_path = checkpoint_dir_path / f"{prefix}_optimizer.safetensors"
     if optimizer_tensors_path.exists():
         optimizer_tensors = load_file(filename=optimizer_tensors_path, device=device)
     else:
@@ -189,7 +189,7 @@ def _load_optimizer_state(
 
 
 def save_checkpoint(
-    checkpoints_dir_path: str | Path,
+    checkpoint_dir_path: str | Path,
     epoch: int,
     generator: nn.Module,
     discriminator: nn.Module,
@@ -201,7 +201,7 @@ def save_checkpoint(
     generator_scheduler: MultiStepLR | None = None,
     discriminator_scheduler: MultiStepLR | None = None,
 ) -> None:
-    checkpoint_dir_path = Path(checkpoints_dir_path) / "srgan_checkpoint"
+    checkpoint_dir_path = Path(checkpoint_dir_path)
     checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
 
     save_file(generator.state_dict(), checkpoint_dir_path / "generator.safetensors")
@@ -243,11 +243,11 @@ def save_checkpoint(
     with open(checkpoint_dir_path / "training_state.json", "w") as f:
         json.dump(full_metadata, f, indent=4)
 
-    logger.info(f'Checkpoint was saved to "{checkpoint_dir_path}" after {epoch} epoch')
+    logger.debug(f'Checkpoint was saved to "{checkpoint_dir_path}" after {epoch} epoch')
 
 
 def load_checkpoint(
-    checkpoints_dir_path: str | Path,
+    checkpoint_dir_path: str | Path,
     generator: nn.Module,
     discriminator: nn.Module,
     generator_optimizer: optim.Optimizer,
@@ -259,19 +259,19 @@ def load_checkpoint(
     discriminator_scheduler: MultiStepLR | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
 ) -> int:
-    checkpoints_dir_path = Path(checkpoints_dir_path)
+    checkpoint_dir_path = Path(checkpoint_dir_path)
 
-    generator_path = checkpoints_dir_path / "generator.safetensors"
-    discriminator_path = checkpoints_dir_path / "discriminator.safetensors"
-    state_path = checkpoints_dir_path / "training_state.json"
+    generator_path = checkpoint_dir_path / "generator.safetensors"
+    discriminator_path = checkpoint_dir_path / "discriminator.safetensors"
+    state_path = checkpoint_dir_path / "training_state.json"
 
     if (
         not generator_path.exists()
         or not discriminator_path.exists()
         or not state_path.exists()
     ):
-        logger.info(
-            f'Checkpoint was not found at "{checkpoints_dir_path}", starting from 1 epoch'
+        logger.warning(
+            f'Checkpoint was not found at "{checkpoint_dir_path}", starting from 1 epoch'
         )
         return 1
 
@@ -314,7 +314,7 @@ def load_checkpoint(
 
     _load_optimizer_state(
         generator_optimizer,
-        checkpoints_dir_path,
+        checkpoint_dir_path,
         "generator",
         full_metadata,
         device,
@@ -322,13 +322,13 @@ def load_checkpoint(
 
     _load_optimizer_state(
         discriminator_optimizer,
-        checkpoints_dir_path,
+        checkpoint_dir_path,
         "discriminator",
         full_metadata,
         device,
     )
 
-    logger.info(f'Checkpoint was loaded from "{checkpoints_dir_path}"')
+    logger.info(f'Checkpoint was loaded from "{checkpoint_dir_path}"')
 
     return full_metadata["epoch"]
 
@@ -342,3 +342,24 @@ def format_time(total_seconds: float) -> str:
     seconds = int(total_seconds % 60)
 
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def rgb_to_ycbcr(image_tensor: torch.Tensor) -> torch.Tensor:
+    if image_tensor.dim() == 4:
+        image_tensor.squeeze_(0)
+
+    image_tensor = (image_tensor + 1) / 2
+
+    weights = torch.tensor(
+        [0.299, 0.587, 0.114],
+        dtype=image_tensor.dtype,
+        device=image_tensor.device,
+    )
+
+    Y_channel = torch.sum(
+        image_tensor * weights.view(1, 3, 1, 1),
+        dim=1,
+        keepdim=True,
+    )
+
+    return Y_channel
