@@ -18,21 +18,21 @@ from utils import Metrics, format_time, load_checkpoint, rgb_to_ycbcr, save_chec
 SCALING_FACTOR: Literal[2, 4, 8] = 4
 CROP_SIZE = 128
 
-GENERATOR_N_CHANNELS = 96
-GENERATOR_N_RES_BLOCKS = 16
-LARGE_KERNEL_SIZE = 9
-SMALL_KERNEL_SIZE = 3
+GENERATOR_CHANNELS_COUNT = 96
+GENERATOR_RES_BLOCKS_COUNT = 16
+GENERATOR_LARGE_KERNEL_SIZE = 9
+GENERATOR_SMALL_KERNEL_SIZE = 3
 
-DISCRIMINATOR_N_CHANNELS = 64
+DISCRIMINATOR_CHANNELS_COUNT = 64
 DISCRIMINATOR_KERNEL_SIZE = 3
-DISCRIMINATOR_N_CONV_BLOCKS = 8
-DISCRIMINATOR_FLL_SIZE = 1024
+DISCRIMINATOR_CONV_BLOCKS_COUNT = 8
+DISCRIMINATOR_LINEAR_LAYER_SIZE = 1024
 
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-5
 MAX_LEARNING_RATE = 1e-4
 EPOCHS = 500
-PRINT_FREQ = 200
+PRINT_FREQUENCY = 200
 
 INITIALIZE_WITH_SRRESNET_CHECKPOINT = True
 LOAD_CHECKPOINT = False
@@ -43,7 +43,7 @@ NUM_WORKERS = 8
 
 SCHEDULER_MILESTONES = [EPOCHS // 2]
 SCHEDULER_GAMMA = 0.5
-BETA = 1e-3
+PERCEPTUAL_LOSS_BETA = 1e-3
 
 TRAIN_DATASET_PATH = Path("data/DF2K_OST.txt")
 VAL_DATASET_PATH = Path("data/DIV2K_valid.txt")
@@ -96,7 +96,7 @@ def train_step(
             adversarial_loss = adversarial_loss_fn(
                 sr_discriminated, torch.ones_like(sr_discriminated)
             )
-            perceptual_loss = content_loss + BETA * adversarial_loss
+            perceptual_loss = content_loss + PERCEPTUAL_LOSS_BETA * adversarial_loss
 
         total_generator_loss += perceptual_loss.item()
 
@@ -130,7 +130,7 @@ def train_step(
             adversarial_loss.backward()
             discriminator_optimizer.step()
 
-        if i % PRINT_FREQ == 0:
+        if i % PRINT_FREQUENCY == 0:
             logger.debug(f"Processing batch {i}/{len(data_loader)}...")
 
     total_generator_loss /= len(data_loader)
@@ -368,18 +368,18 @@ def main() -> None:
     )
 
     generator = Generator(
-        n_channels=GENERATOR_N_CHANNELS,
-        large_kernel_size=LARGE_KERNEL_SIZE,
-        small_kernel_size=SMALL_KERNEL_SIZE,
-        n_res_blocks=GENERATOR_N_RES_BLOCKS,
+        channels_count=GENERATOR_CHANNELS_COUNT,
+        large_kernel_size=GENERATOR_LARGE_KERNEL_SIZE,
+        small_kernel_size=GENERATOR_SMALL_KERNEL_SIZE,
+        res_blocks_count=GENERATOR_RES_BLOCKS_COUNT,
         scaling_factor=SCALING_FACTOR,
     ).to(device)
 
     discriminator = Discriminator(
-        n_channels=DISCRIMINATOR_N_CHANNELS,
+        channels_count=DISCRIMINATOR_CHANNELS_COUNT,
         kernel_size=DISCRIMINATOR_KERNEL_SIZE,
-        n_conv_blocks=DISCRIMINATOR_N_CONV_BLOCKS,
-        first_linear_layer_size=DISCRIMINATOR_FLL_SIZE,
+        conv_blocks_count=DISCRIMINATOR_CONV_BLOCKS_COUNT,
+        linear_layer_size=DISCRIMINATOR_LINEAR_LAYER_SIZE,
     ).to(device)
 
     truncated_vgg19 = TruncatedVGG19().to(device)

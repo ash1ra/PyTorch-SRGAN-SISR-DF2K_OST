@@ -53,7 +53,7 @@ class ConvBlock(nn.Module):
 class SubPixelConvBlock(nn.Module):
     def __init__(
         self,
-        n_channels: int,
+        channels_count: int,
         kernel_size: int,
         scaling_factor: Literal[2, 4, 8],
     ) -> None:
@@ -61,8 +61,8 @@ class SubPixelConvBlock(nn.Module):
 
         self.subpixel_conv_block = nn.Sequential(
             nn.Conv2d(
-                in_channels=n_channels,
-                out_channels=n_channels * (scaling_factor**2),
+                in_channels=channels_count,
+                out_channels=channels_count * (scaling_factor**2),
                 kernel_size=kernel_size,
                 padding=kernel_size // 2,
             ),
@@ -75,20 +75,20 @@ class SubPixelConvBlock(nn.Module):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, n_channels: int, kernel_size: int) -> None:
+    def __init__(self, channels_count: int, kernel_size: int) -> None:
         super().__init__()
 
         self.res_block = nn.Sequential(
             ConvBlock(
-                in_channels=n_channels,
-                out_channels=n_channels,
+                in_channels=channels_count,
+                out_channels=channels_count,
                 kernel_size=kernel_size,
                 norm_layer=True,
                 activation="prelu",
             ),
             ConvBlock(
-                in_channels=n_channels,
-                out_channels=n_channels,
+                in_channels=channels_count,
+                out_channels=channels_count,
                 kernel_size=kernel_size,
                 norm_layer=True,
             ),
@@ -101,31 +101,31 @@ class ResBlock(nn.Module):
 class Generator(nn.Module):
     def __init__(
         self,
-        n_channels: int,
+        channels_count: int,
         large_kernel_size: int,
         small_kernel_size: int,
-        n_res_blocks: int,
+        res_blocks_count: int,
         scaling_factor: Literal[2, 4, 8],
     ) -> None:
         super().__init__()
 
         self.conv_block1 = ConvBlock(
             in_channels=3,
-            out_channels=n_channels,
+            out_channels=channels_count,
             kernel_size=large_kernel_size,
             activation="prelu",
         )
 
         self.res_blocks = nn.Sequential(
             *[
-                ResBlock(n_channels=n_channels, kernel_size=small_kernel_size)
-                for _ in range(n_res_blocks)
+                ResBlock(channels_count=channels_count, kernel_size=small_kernel_size)
+                for _ in range(res_blocks_count)
             ]
         )
 
         self.conv_block2 = ConvBlock(
-            in_channels=n_channels,
-            out_channels=n_channels,
+            in_channels=channels_count,
+            out_channels=channels_count,
             kernel_size=small_kernel_size,
             norm_layer=True,
         )
@@ -133,7 +133,7 @@ class Generator(nn.Module):
         self.subpixel_conv_blocks = nn.Sequential(
             *[
                 SubPixelConvBlock(
-                    n_channels=n_channels,
+                    channels_count=channels_count,
                     kernel_size=small_kernel_size,
                     scaling_factor=2,
                 )
@@ -142,7 +142,7 @@ class Generator(nn.Module):
         )
 
         self.conv_block3 = ConvBlock(
-            in_channels=n_channels,
+            in_channels=channels_count,
             out_channels=3,
             kernel_size=large_kernel_size,
             activation="tanh",
@@ -163,10 +163,10 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     def __init__(
         self,
-        n_channels: int,
+        channels_count: int,
         kernel_size: int,
-        n_conv_blocks: int,
-        first_linear_layer_size: int,
+        conv_blocks_count: int,
+        linear_layer_size: int,
     ) -> None:
         super().__init__()
 
@@ -175,15 +175,15 @@ class Discriminator(nn.Module):
         conv_blocks.append(
             ConvBlock(
                 in_channels=3,
-                out_channels=n_channels,
+                out_channels=channels_count,
                 kernel_size=kernel_size,
                 activation="leaky_relu",
             )
         )
 
-        in_channels = n_channels
+        in_channels = channels_count
 
-        for i in range(1, n_conv_blocks):
+        for i in range(1, conv_blocks_count):
             out_channels = in_channels * 2 if i % 2 == 0 else in_channels
             stride = 1 if i % 2 == 0 else 2
 
@@ -204,9 +204,9 @@ class Discriminator(nn.Module):
             *conv_blocks,
             nn.AdaptiveAvgPool2d((6, 6)),
             nn.Flatten(),
-            nn.Linear(in_channels * 6 * 6, first_linear_layer_size),
+            nn.Linear(in_channels * 6 * 6, linear_layer_size),
             nn.LeakyReLU(0.2),
-            nn.Linear(first_linear_layer_size, 1),
+            nn.Linear(linear_layer_size, 1),
         )
 
     def forward(self, x: Tensor) -> Tensor:

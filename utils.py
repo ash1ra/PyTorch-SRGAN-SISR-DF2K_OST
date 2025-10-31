@@ -344,20 +344,20 @@ def format_time(total_seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
-def rgb_to_ycbcr(image_tensor: torch.Tensor) -> torch.Tensor:
-    if image_tensor.dim() == 4:
-        image_tensor.squeeze_(0)
+def rgb_to_ycbcr(img_tensor: torch.Tensor) -> torch.Tensor:
+    if img_tensor.dim() == 4:
+        img_tensor.squeeze_(0)
 
-    image_tensor = (image_tensor + 1) / 2
+    img_tensor = (img_tensor + 1) / 2
 
     weights = torch.tensor(
         [0.299, 0.587, 0.114],
-        dtype=image_tensor.dtype,
-        device=image_tensor.device,
+        dtype=img_tensor.dtype,
+        device=img_tensor.device,
     )
 
     Y_channel = torch.sum(
-        image_tensor * weights.view(1, 3, 1, 1),
+        img_tensor * weights.view(1, 3, 1, 1),
         dim=1,
         keepdim=True,
     )
