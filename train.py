@@ -1,4 +1,3 @@
-from pathlib import Path
 from time import time
 from typing import Literal
 
@@ -10,51 +9,12 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 
-from config import create_logger
+import config
 from data_processing import SRDataset
 from models import Discriminator, Generator, TruncatedVGG19
 from utils import Metrics, format_time, load_checkpoint, rgb_to_ycbcr, save_checkpoint
 
-SCALING_FACTOR: Literal[2, 4, 8] = 4
-CROP_SIZE = 128
-
-GENERATOR_CHANNELS_COUNT = 96
-GENERATOR_RES_BLOCKS_COUNT = 16
-GENERATOR_LARGE_KERNEL_SIZE = 9
-GENERATOR_SMALL_KERNEL_SIZE = 3
-
-DISCRIMINATOR_CHANNELS_COUNT = 64
-DISCRIMINATOR_KERNEL_SIZE = 3
-DISCRIMINATOR_CONV_BLOCKS_COUNT = 8
-DISCRIMINATOR_LINEAR_LAYER_SIZE = 1024
-
-BATCH_SIZE = 32
-LEARNING_RATE = 1e-5
-MAX_LEARNING_RATE = 1e-4
-EPOCHS = 500
-PRINT_FREQUENCY = 200
-
-INITIALIZE_WITH_SRRESNET_CHECKPOINT = True
-LOAD_CHECKPOINT = False
-LOAD_BEST_CHECKPOINT = False
-DEV_MOVE = True
-
-NUM_WORKERS = 8
-
-SCHEDULER_MILESTONES = [EPOCHS // 2]
-SCHEDULER_GAMMA = 0.5
-PERCEPTUAL_LOSS_BETA = 1e-3
-
-TRAIN_DATASET_PATH = Path("data/DF2K_OST.txt")
-VAL_DATASET_PATH = Path("data/DIV2K_valid.txt")
-
-SRRESNET_MODEL_CHECKPOINT_PATH = Path(
-    "checkpoints/srresnet_best/srresnet_model_best.safetensors"
-)
-BEST_CHECKPOINT_DIR_PATH = Path("checkpoints/srgan_best")
-CHECKPOINT_DIR_PATH = Path("checkpoints/srgan_latest")
-
-logger = create_logger("INFO", __file__)
+logger = config.create_logger("INFO", __file__)
 
 
 def train_step(
@@ -96,7 +56,9 @@ def train_step(
             adversarial_loss = adversarial_loss_fn(
                 sr_discriminated, torch.ones_like(sr_discriminated)
             )
-            perceptual_loss = content_loss + PERCEPTUAL_LOSS_BETA * adversarial_loss
+            perceptual_loss = (
+                content_loss + config.PERCEPTUAL_LOSS_BETA * adversarial_loss
+            )
 
         total_generator_loss += perceptual_loss.item()
 
@@ -130,7 +92,7 @@ def train_step(
             adversarial_loss.backward()
             discriminator_optimizer.step()
 
-        if i % PRINT_FREQUENCY == 0:
+        if i % config.PRINT_FREQUENCY == 0:
             logger.debug(f"Processing batch {i}/{len(data_loader)}...")
 
     total_generator_loss /= len(data_loader)
@@ -171,7 +133,7 @@ def validation_step(
             y_hr_tensor = rgb_to_ycbcr(hr_img_tensor)
             y_sr_tensor = rgb_to_ycbcr(sr_img_tensor)
 
-            sf = SCALING_FACTOR
+            sf = config.SCALING_FACTOR
             y_hr_tensor = y_hr_tensor[:, :, sf:-sf, sf:-sf]
             y_sr_tensor = y_sr_tensor[:, :, sf:-sf, sf:-sf]
 
@@ -220,7 +182,7 @@ def train(
 
     logger.info("-" * 107)
     logger.info("Model parameters:")
-    logger.info(f"Scaling factor: {SCALING_FACTOR}")
+    logger.info(f"Scaling factor: {config.SCALING_FACTOR}")
     logger.info("-" * 107)
     logger.info("Starting model training...")
 
@@ -290,7 +252,7 @@ def train(
                     f"New best model found with val loss: {best_val_loss:.4f} at epoch {epoch}"
                 )
                 save_checkpoint(
-                    checkpoint_dir_path=BEST_CHECKPOINT_DIR_PATH,
+                    checkpoint_dir_path=config.BEST_CHECKPOINT_DIR_PATH,
                     epoch=epoch,
                     generator=generator,
                     discriminator=discriminator,
@@ -304,7 +266,7 @@ def train(
                 )
 
             save_checkpoint(
-                checkpoint_dir_path=CHECKPOINT_DIR_PATH,
+                checkpoint_dir_path=config.CHECKPOINT_DIR_PATH,
                 epoch=epoch,
                 generator=generator,
                 discriminator=discriminator,
@@ -320,7 +282,7 @@ def train(
     except KeyboardInterrupt:
         logger.info("Saving model's weights and finish training...")
         save_checkpoint(
-            checkpoint_dir_path=CHECKPOINT_DIR_PATH,
+            checkpoint_dir_path=config.CHECKPOINT_DIR_PATH,
             epoch=epoch,
             generator=generator,
             discriminator=discriminator,
@@ -338,48 +300,48 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     train_dataset = SRDataset(
-        data_path=TRAIN_DATASET_PATH,
-        scaling_factor=SCALING_FACTOR,
-        crop_size=CROP_SIZE,
-        dev_mode=DEV_MOVE,
+        data_path=config.TRAIN_DATASET_PATH,
+        scaling_factor=config.SCALING_FACTOR,
+        crop_size=config.CROP_SIZE,
+        dev_mode=config.DEV_MOVE,
     )
 
     val_dataset = SRDataset(
-        data_path=VAL_DATASET_PATH,
-        scaling_factor=SCALING_FACTOR,
-        crop_size=CROP_SIZE,
-        dev_mode=DEV_MOVE,
+        data_path=config.VAL_DATASET_PATH,
+        scaling_factor=config.SCALING_FACTOR,
+        crop_size=config.CROP_SIZE,
+        dev_mode=config.DEV_MOVE,
     )
 
     train_data_loader = DataLoader(
         dataset=train_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=config.TRAIN_BATCH_SIZE,
         shuffle=True,
         pin_memory=True if device == "cuda" else False,
-        num_workers=NUM_WORKERS,
+        num_workers=config.NUM_WORKERS,
     )
 
     val_data_loader = DataLoader(
         dataset=val_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=config.TRAIN_BATCH_SIZE,
         shuffle=False,
         pin_memory=True if device == "cuda" else False,
-        num_workers=NUM_WORKERS,
+        num_workers=config.NUM_WORKERS,
     )
 
     generator = Generator(
-        channels_count=GENERATOR_CHANNELS_COUNT,
-        large_kernel_size=GENERATOR_LARGE_KERNEL_SIZE,
-        small_kernel_size=GENERATOR_SMALL_KERNEL_SIZE,
-        res_blocks_count=GENERATOR_RES_BLOCKS_COUNT,
-        scaling_factor=SCALING_FACTOR,
+        channels_count=config.GENERATOR_CHANNELS_COUNT,
+        large_kernel_size=config.GENERATOR_LARGE_KERNEL_SIZE,
+        small_kernel_size=config.GENERATOR_SMALL_KERNEL_SIZE,
+        res_blocks_count=config.GENERATOR_RES_BLOCKS_COUNT,
+        scaling_factor=config.SCALING_FACTOR,
     ).to(device)
 
     discriminator = Discriminator(
-        channels_count=DISCRIMINATOR_CHANNELS_COUNT,
-        kernel_size=DISCRIMINATOR_KERNEL_SIZE,
-        conv_blocks_count=DISCRIMINATOR_CONV_BLOCKS_COUNT,
-        linear_layer_size=DISCRIMINATOR_LINEAR_LAYER_SIZE,
+        channels_count=config.DISCRIMINATOR_CHANNELS_COUNT,
+        kernel_size=config.DISCRIMINATOR_KERNEL_SIZE,
+        conv_blocks_count=config.DISCRIMINATOR_CONV_BLOCKS_COUNT,
+        linear_layer_size=config.DISCRIMINATOR_LINEAR_LAYER_SIZE,
     ).to(device)
 
     truncated_vgg19 = TruncatedVGG19().to(device)
@@ -391,40 +353,48 @@ def main() -> None:
     psnr_metric = PeakSignalNoiseRatio(data_range=1.0).to(device)
     ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
 
-    generator_optimizer = optim.Adam(generator.parameters(), lr=LEARNING_RATE)
-    discriminator_optimizer = optim.Adam(discriminator.parameters(), lr=LEARNING_RATE)
+    generator_optimizer = optim.Adam(generator.parameters(), lr=config.LEARNING_RATE)
+    discriminator_optimizer = optim.Adam(
+        discriminator.parameters(), lr=config.LEARNING_RATE
+    )
 
     generator_scaler = GradScaler(device) if device == "cuda" else None
     discriminator_scaler = GradScaler(device) if device == "cuda" else None
 
     generator_scheduler = MultiStepLR(
         optimizer=generator_optimizer,
-        milestones=SCHEDULER_MILESTONES,
-        gamma=SCHEDULER_GAMMA,
+        milestones=config.SCHEDULER_MILESTONES,
+        gamma=config.SCHEDULER_GAMMA,
     )
     discriminator_scheduler = MultiStepLR(
         optimizer=discriminator_optimizer,
-        milestones=SCHEDULER_MILESTONES,
-        gamma=SCHEDULER_GAMMA,
+        milestones=config.SCHEDULER_MILESTONES,
+        gamma=config.SCHEDULER_GAMMA,
     )
 
-    if INITIALIZE_WITH_SRRESNET_CHECKPOINT and SRRESNET_MODEL_CHECKPOINT_PATH.exists():
+    if (
+        config.INITIALIZE_WITH_SRRESNET_CHECKPOINT
+        and config.SRRESNET_MODEL_CHECKPOINT_PATH.exists()
+    ):
         generator_weights = load_file(
-            filename=SRRESNET_MODEL_CHECKPOINT_PATH, device=device
+            filename=config.SRRESNET_MODEL_CHECKPOINT_PATH, device=device
         )
         generator.load_state_dict(generator_weights)
         logger.info("Successfully loaded pre-trained SRResNet weights into Generator")
 
     start_epoch = 1
-    if LOAD_CHECKPOINT:
-        if BEST_CHECKPOINT_DIR_PATH.exists() or CHECKPOINT_DIR_PATH.exists():
-            if LOAD_BEST_CHECKPOINT and BEST_CHECKPOINT_DIR_PATH.exists():
-                checkpoint_dir_path_to_load = BEST_CHECKPOINT_DIR_PATH
+    if config.LOAD_CHECKPOINT:
+        if (
+            config.BEST_CHECKPOINT_DIR_PATH.exists()
+            or config.CHECKPOINT_DIR_PATH.exists()
+        ):
+            if config.LOAD_BEST_CHECKPOINT and config.BEST_CHECKPOINT_DIR_PATH.exists():
+                checkpoint_dir_path_to_load = config.BEST_CHECKPOINT_DIR_PATH
                 logger.debug(
                     f'Loading best checkpoint from "{checkpoint_dir_path_to_load}"...'
                 )
-            elif CHECKPOINT_DIR_PATH.exists():
-                checkpoint_dir_path_to_load = CHECKPOINT_DIR_PATH
+            elif config.CHECKPOINT_DIR_PATH.exists():
+                checkpoint_dir_path_to_load = config.CHECKPOINT_DIR_PATH
                 logger.debug(
                     f'Loading checkpoint from "{checkpoint_dir_path_to_load}"...'
                 )
@@ -467,7 +437,7 @@ def main() -> None:
         generator_optimizer=generator_optimizer,
         discriminator_optimizer=discriminator_optimizer,
         start_epoch=start_epoch,
-        epochs=EPOCHS,
+        epochs=config.EPOCHS,
         metrics=metrics,
         psnr_metric=psnr_metric,
         ssim_metric=ssim_metric,
