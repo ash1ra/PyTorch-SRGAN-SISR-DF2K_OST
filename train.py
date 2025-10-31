@@ -111,8 +111,6 @@ def validation_step(
     device: Literal["cpu", "cuda"] = "cpu",
 ) -> tuple[float, float, float]:
     total_content_loss = 0.0
-    total_psnr = 0
-    total_ssim = 0
 
     generator.eval()
 
@@ -137,16 +135,17 @@ def validation_step(
             y_hr_tensor = y_hr_tensor[:, :, sf:-sf, sf:-sf]
             y_sr_tensor = y_sr_tensor[:, :, sf:-sf, sf:-sf]
 
-            psnr = psnr_metric(y_sr_tensor, y_hr_tensor)
-            ssim = ssim_metric(y_sr_tensor, y_hr_tensor)
+            psnr_metric.update(y_sr_tensor, y_hr_tensor)  # type: ignore
+            ssim_metric.update(y_sr_tensor, y_hr_tensor)  # type: ignore
 
             total_content_loss += content_loss.item()
-            total_psnr += psnr.item()
-            total_ssim += ssim.item()
 
         total_content_loss /= len(data_loader)
-        total_psnr /= len(data_loader)
-        total_ssim /= len(data_loader)
+        total_psnr = psnr_metric.compute().item()  # type: ignore
+        total_ssim = ssim_metric.compute().item()  # type: ignore
+
+        psnr_metric.reset()
+        ssim_metric.reset()
 
     return total_content_loss, total_psnr, total_ssim
 
