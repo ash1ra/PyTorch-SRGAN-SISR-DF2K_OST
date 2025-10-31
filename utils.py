@@ -249,10 +249,11 @@ def save_checkpoint(
 def load_checkpoint(
     checkpoint_dir_path: str | Path,
     generator: nn.Module,
-    discriminator: nn.Module,
-    generator_optimizer: optim.Optimizer,
-    discriminator_optimizer: optim.Optimizer,
-    metrics: Metrics,
+    test_mode: bool = False,
+    discriminator: nn.Module | None = None,
+    generator_optimizer: optim.Optimizer | None = None,
+    discriminator_optimizer: optim.Optimizer | None = None,
+    metrics: Metrics | None = None,
     generator_scaler: GradScaler | None = None,
     discriminator_scaler: GradScaler | None = None,
     generator_scheduler: MultiStepLR | None = None,
@@ -275,62 +276,78 @@ def load_checkpoint(
         )
         return 1
 
-    generator.load_state_dict(load_file(filename=generator_path, device=device))
-    discriminator.load_state_dict(load_file(filename=discriminator_path, device=device))
-
-    with open(state_path, "r") as f:
-        full_metadata = json.load(f)
-
-    if metrics and "metrics" in full_metadata:
-        metrics_dict = full_metadata["metrics"]
-        metrics.epochs = metrics_dict["epochs"]
-        metrics.generator_learning_rates = metrics_dict["generator_learning_rates"]
-        metrics.discriminator_learning_rates = metrics_dict[
-            "discriminator_learning_rates"
-        ]
-        metrics.generator_train_losses = metrics_dict["generator_train_losses"]
-        metrics.discriminator_train_losses = metrics_dict["discriminator_train_losses"]
-        metrics.generator_val_losses = metrics_dict["generator_val_losses"]
-        metrics.generator_val_psnrs = metrics_dict["generator_val_psnrs"]
-        metrics.generator_val_ssims = metrics_dict["generator_val_ssims"]
-
-    if generator_scaler and full_metadata["generator_scaler_state_dict"]:
-        generator_scaler.load_state_dict(full_metadata["generator_scaler_state_dict"])
-
-    if discriminator_scaler and full_metadata["discriminator_scaler_state_dict"]:
-        discriminator_scaler.load_state_dict(
-            full_metadata["discriminator_scaler_state_dict"]
+    if test_mode:
+        generator.load_state_dict(load_file(filename=generator_path, device=device))
+        return 1
+    elif discriminator and generator_optimizer and discriminator_optimizer:
+        generator.load_state_dict(load_file(filename=generator_path, device=device))
+        discriminator.load_state_dict(
+            load_file(filename=discriminator_path, device=device)
         )
 
-    if generator_scheduler and full_metadata["generator_scheduler_state_dict"]:
-        generator_scheduler.load_state_dict(
-            full_metadata["generator_scheduler_state_dict"]
+        with open(state_path, "r") as f:
+            full_metadata = json.load(f)
+
+        if metrics and "metrics" in full_metadata:
+            metrics_dict = full_metadata["metrics"]
+            metrics.epochs = metrics_dict["epochs"]
+            metrics.generator_learning_rates = metrics_dict["generator_learning_rates"]
+            metrics.discriminator_learning_rates = metrics_dict[
+                "discriminator_learning_rates"
+            ]
+            metrics.generator_train_losses = metrics_dict["generator_train_losses"]
+            metrics.discriminator_train_losses = metrics_dict[
+                "discriminator_train_losses"
+            ]
+            metrics.generator_val_losses = metrics_dict["generator_val_losses"]
+            metrics.generator_val_psnrs = metrics_dict["generator_val_psnrs"]
+            metrics.generator_val_ssims = metrics_dict["generator_val_ssims"]
+
+        if generator_scaler and full_metadata["generator_scaler_state_dict"]:
+            generator_scaler.load_state_dict(
+                full_metadata["generator_scaler_state_dict"]
+            )
+
+        if discriminator_scaler and full_metadata["discriminator_scaler_state_dict"]:
+            discriminator_scaler.load_state_dict(
+                full_metadata["discriminator_scaler_state_dict"]
+            )
+
+        if generator_scheduler and full_metadata["generator_scheduler_state_dict"]:
+            generator_scheduler.load_state_dict(
+                full_metadata["generator_scheduler_state_dict"]
+            )
+
+        if (
+            discriminator_scheduler
+            and full_metadata["discriminator_scheduler_state_dict"]
+        ):
+            discriminator_scheduler.load_state_dict(
+                full_metadata["discriminator_scheduler_state_dict"]
+            )
+
+        _load_optimizer_state(
+            generator_optimizer,
+            checkpoint_dir_path,
+            "generator",
+            full_metadata,
+            device,
         )
 
-    if discriminator_scheduler and full_metadata["discriminator_scheduler_state_dict"]:
-        discriminator_scheduler.load_state_dict(
-            full_metadata["discriminator_scheduler_state_dict"]
+        _load_optimizer_state(
+            discriminator_optimizer,
+            checkpoint_dir_path,
+            "discriminator",
+            full_metadata,
+            device,
         )
 
-    _load_optimizer_state(
-        generator_optimizer,
-        checkpoint_dir_path,
-        "generator",
-        full_metadata,
-        device,
-    )
+        logger.info(f'Checkpoint was loaded from "{checkpoint_dir_path}"')
 
-    _load_optimizer_state(
-        discriminator_optimizer,
-        checkpoint_dir_path,
-        "discriminator",
-        full_metadata,
-        device,
-    )
-
-    logger.info(f'Checkpoint was loaded from "{checkpoint_dir_path}"')
-
-    return full_metadata["epoch"]
+        return full_metadata["epoch"]
+    else:
+        logger.error("Not enought arguments passed to the load_checkpoint function")
+        return 0
 
 
 def format_time(total_seconds: float) -> str:

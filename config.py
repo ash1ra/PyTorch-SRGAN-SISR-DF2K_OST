@@ -38,7 +38,12 @@ NUM_WORKERS = 8
 
 TRAIN_DATASET_PATH = Path("data/DF2K_OST.txt")
 VAL_DATASET_PATH = Path("data/DIV2K_valid.txt")
-TEST_DATASETS_PATH = Path("data/test_datasets.txt")
+TEST_DATASETS_PATHES = [
+    Path("data/Set5.txt"),
+    Path("data/Set14.txt"),
+    Path("data/BSDS100.txt"),
+    Path("data/Urban100.txt"),
+]
 
 SRRESNET_MODEL_CHECKPOINT_PATH = Path(
     "checkpoints/srresnet_best/srresnet_model_best.safetensors"
