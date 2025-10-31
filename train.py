@@ -3,6 +3,7 @@ from time import time
 from typing import Literal
 
 import torch
+from safetensors.torch import load_file
 from torch import nn, optim
 from torch.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import MultiStepLR
@@ -12,7 +13,7 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 from config import create_logger
 from data_processing import SRDataset
 from models import Discriminator, Generator, TruncatedVGG19
-from utils import Metrics, format_time, load_checkpoint, save_checkpoint
+from utils import Metrics, format_time, load_checkpoint, rgb_to_ycbcr, save_checkpoint
 
 SCALING_FACTOR: Literal[2, 4, 8] = 4
 CROP_SIZE = 128
@@ -33,6 +34,7 @@ MAX_LEARNING_RATE = 1e-4
 EPOCHS = 500
 PRINT_FREQ = 200
 
+INITIALIZE_WITH_SRRESNET_CHECKPOINT = True
 LOAD_CHECKPOINT = False
 LOAD_BEST_CHECKPOINT = False
 DEV_MOVE = True
@@ -46,8 +48,11 @@ BETA = 1e-3
 TRAIN_DATASET_PATH = Path("data/DF2K_OST.txt")
 VAL_DATASET_PATH = Path("data/DIV2K_valid.txt")
 
-BEST_CHECKPOINT_DIR_PATH = Path("checkpoints/?")
-CHECKPOINTS_DIR_PATH = Path("checkpoints")
+SRRESNET_MODEL_CHECKPOINT_PATH = Path(
+    "checkpoints/srresnet_best/srresnet_model_best.safetensors"
+)
+BEST_CHECKPOINT_DIR_PATH = Path("checkpoints/srgan_best")
+CHECKPOINT_DIR_PATH = Path("checkpoints/srgan_latest")
 
 logger = create_logger("INFO", __file__)
 
@@ -134,7 +139,54 @@ def train_step(
     return total_generator_loss, total_discrimination_loss
 
 
-def validation_step() -> ...: ...
+def validation_step(
+    data_loader: DataLoader,
+    generator: nn.Module,
+    truncated_vgg19: nn.Module,
+    content_loss_fn: nn.Module,
+    psnr_metric: PeakSignalNoiseRatio,
+    ssim_metric: StructuralSimilarityIndexMeasure,
+    device: Literal["cpu", "cuda"] = "cpu",
+) -> tuple[float, float, float]:
+    total_content_loss = 0.0
+    total_psnr = 0
+    total_ssim = 0
+
+    generator.eval()
+
+    with torch.inference_mode():
+        for hr_img_tensor, lr_img_tensor in data_loader:
+            hr_img_tensor = hr_img_tensor.to(device, non_blocking=True)
+            lr_img_tensor = lr_img_tensor.to(device, non_blocking=True)
+
+            sr_img_tensor = generator(lr_img_tensor)
+
+            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor)
+            hr_img_tensor_in_vgg_space = truncated_vgg19(hr_img_tensor)
+
+            content_loss = content_loss_fn(
+                sr_img_tensor_in_vgg_space, hr_img_tensor_in_vgg_space
+            )
+
+            y_hr_tensor = rgb_to_ycbcr(hr_img_tensor)
+            y_sr_tensor = rgb_to_ycbcr(sr_img_tensor)
+
+            sf = SCALING_FACTOR
+            y_hr_tensor = y_hr_tensor[:, :, sf:-sf, sf:-sf]
+            y_sr_tensor = y_sr_tensor[:, :, sf:-sf, sf:-sf]
+
+            psnr = psnr_metric(y_sr_tensor, y_hr_tensor)
+            ssim = ssim_metric(y_sr_tensor, y_hr_tensor)
+
+            total_content_loss += content_loss.item()
+            total_psnr += psnr.item()
+            total_ssim += ssim.item()
+
+        total_content_loss /= len(data_loader)
+        total_psnr /= len(data_loader)
+        total_ssim /= len(data_loader)
+
+    return total_content_loss, total_psnr, total_ssim
 
 
 def train(
@@ -157,9 +209,14 @@ def train(
     generator_scheduler: MultiStepLR | None = None,
     discriminator_scheduler: MultiStepLR | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
-) -> ...:
+) -> None:
     if not metrics.epochs:
         metrics.epochs = epochs - start_epoch + 1
+
+    if start_epoch > 1 and metrics.generator_val_losses:
+        best_val_loss = min(metrics.generator_val_losses)
+    else:
+        best_val_loss = float("inf")
 
     logger.info("-" * 107)
     logger.info("Model parameters:")
@@ -187,9 +244,17 @@ def train(
                 device=device,
             )
 
-            # generator_val_loss, generator_val_psnr, generator_val_ssim = (
-            #     validation_step()
-            # )
+            generator_val_loss, generator_val_psnr, generator_val_ssim = (
+                validation_step(
+                    data_loader=val_data_loader,
+                    generator=generator,
+                    truncated_vgg19=truncated_vgg19,
+                    content_loss_fn=content_loss_fn,
+                    psnr_metric=psnr_metric,
+                    ssim_metric=ssim_metric,
+                    device=device,
+                )
+            )
 
             if generator_scheduler:
                 generator_scheduler.step()
@@ -208,14 +273,38 @@ def train(
             metrics.discriminator_learning_rates.append(discriminator_optimizer_lr)
             metrics.generator_train_losses.append(generator_train_loss)
             metrics.discriminator_train_losses.append(discriminator_train_loss)
-            # metrics.generator_val_losses.append(generator_val_loss)
-            # metrics.generator_val_psnrs.append(generator_val_psnr)
-            # metrics.generator_val_ssims.append(generator_val_ssim)
+            metrics.generator_val_losses.append(generator_val_loss)
+            metrics.generator_val_psnrs.append(generator_val_psnr)
+            metrics.generator_val_ssims.append(generator_val_ssim)
 
-            logger.info(f"Epoch: {epoch}/{epochs} ({epoch_time}/{remaining_time})")
+            logger.info(
+                f"Epoch: {epoch}/{epochs} ({epoch_time}/{remaining_time}) | Generator LR: {generator_optimizer_lr} | Discriminator LR: {discriminator_optimizer_lr}"
+            )
+            logger.info(
+                f"Generator Train Loss: {generator_train_loss:.4f} | Discriminator Train Loss: {discriminator_train_loss:.4f} | Generator Val Loss: {generator_val_loss:.4f} | Generator Val PSNR: {generator_val_psnr:.4f} | Generator Val SSIM: {generator_val_ssim:.4f}"
+            )
+
+            if generator_val_loss < best_val_loss:
+                best_val_loss = generator_val_loss
+                logger.debug(
+                    f"New best model found with val loss: {best_val_loss:.4f} at epoch {epoch}"
+                )
+                save_checkpoint(
+                    checkpoint_dir_path=BEST_CHECKPOINT_DIR_PATH,
+                    epoch=epoch,
+                    generator=generator,
+                    discriminator=discriminator,
+                    generator_optimizer=generator_optimizer,
+                    discriminator_optimizer=discriminator_optimizer,
+                    metrics=metrics,
+                    generator_scaler=generator_scaler,
+                    discriminator_scaler=discriminator_scaler,
+                    generator_scheduler=generator_scheduler,
+                    discriminator_scheduler=discriminator_scheduler,
+                )
 
             save_checkpoint(
-                checkpoints_dir_path=CHECKPOINTS_DIR_PATH,
+                checkpoint_dir_path=CHECKPOINT_DIR_PATH,
                 epoch=epoch,
                 generator=generator,
                 discriminator=discriminator,
@@ -231,7 +320,7 @@ def train(
     except KeyboardInterrupt:
         logger.info("Saving model's weights and finish training...")
         save_checkpoint(
-            checkpoints_dir_path=CHECKPOINTS_DIR_PATH,
+            checkpoint_dir_path=CHECKPOINT_DIR_PATH,
             epoch=epoch,
             generator=generator,
             discriminator=discriminator,
@@ -319,41 +408,53 @@ def main() -> None:
         gamma=SCHEDULER_GAMMA,
     )
 
-    if LOAD_CHECKPOINT:
-        if LOAD_BEST_CHECKPOINT and BEST_CHECKPOINT_DIR_PATH.exists():
-            checkpoint_dir_path_to_load = BEST_CHECKPOINT_DIR_PATH
-            logger.info(
-                f"Loading best checkpoint from {checkpoint_dir_path_to_load.name}"
-            )
-        elif CHECKPOINTS_DIR_PATH.exists():
-            checkpoint_dir_path_to_load = CHECKPOINTS_DIR_PATH
-            logger.info(f"Loading checkpoint from {checkpoint_dir_path_to_load.name}")
-
-        start_epoch = load_checkpoint(
-            checkpoints_dir_path=checkpoint_dir_path_to_load,
-            generator=generator,
-            discriminator=discriminator,
-            generator_optimizer=generator_optimizer,
-            discriminator_optimizer=discriminator_optimizer,
-            metrics=metrics,
-            generator_scaler=generator_scaler,
-            discriminator_scaler=discriminator_scaler,
-            generator_scheduler=generator_scheduler,
-            discriminator_scheduler=discriminator_scheduler,
-            device=device,
+    if INITIALIZE_WITH_SRRESNET_CHECKPOINT and SRRESNET_MODEL_CHECKPOINT_PATH.exists():
+        generator_weights = load_file(
+            filename=SRRESNET_MODEL_CHECKPOINT_PATH, device=device
         )
+        generator.load_state_dict(generator_weights)
+        logger.info("Successfully loaded pre-trained SRResNet weights into Generator")
 
-        if generator_scheduler and discriminator_scheduler and start_epoch > 1:
-            epochs_to_skip = start_epoch - 1
+    start_epoch = 1
+    if LOAD_CHECKPOINT:
+        if BEST_CHECKPOINT_DIR_PATH.exists() or CHECKPOINT_DIR_PATH.exists():
+            if LOAD_BEST_CHECKPOINT and BEST_CHECKPOINT_DIR_PATH.exists():
+                checkpoint_dir_path_to_load = BEST_CHECKPOINT_DIR_PATH
+                logger.debug(
+                    f'Loading best checkpoint from "{checkpoint_dir_path_to_load}"...'
+                )
+            elif CHECKPOINT_DIR_PATH.exists():
+                checkpoint_dir_path_to_load = CHECKPOINT_DIR_PATH
+                logger.debug(
+                    f'Loading checkpoint from "{checkpoint_dir_path_to_load}"...'
+                )
 
-            for _ in range(epochs_to_skip):
-                generator_scheduler.step()
-                discriminator_scheduler.step()
+            start_epoch = load_checkpoint(
+                checkpoint_dir_path=checkpoint_dir_path_to_load,
+                generator=generator,
+                discriminator=discriminator,
+                generator_optimizer=generator_optimizer,
+                discriminator_optimizer=discriminator_optimizer,
+                metrics=metrics,
+                generator_scaler=generator_scaler,
+                discriminator_scaler=discriminator_scaler,
+                generator_scheduler=generator_scheduler,
+                discriminator_scheduler=discriminator_scheduler,
+                device=device,
+            )
 
-            logger.info(f"Schedulers advanced to epoch {start_epoch}")
-    else:
-        logger.info("No checkpoints were found, start training from the beginning")
-        start_epoch = 1
+            if generator_scheduler and discriminator_scheduler and start_epoch > 1:
+                epochs_to_skip = start_epoch - 1
+
+                for _ in range(epochs_to_skip):
+                    generator_scheduler.step()
+                    discriminator_scheduler.step()
+
+                logger.info(f"Schedulers advanced to epoch {start_epoch}")
+        else:
+            logger.info(
+                "No checkpoints were found, start training from the beginning..."
+            )
 
     train(
         train_data_loader=train_data_loader,
