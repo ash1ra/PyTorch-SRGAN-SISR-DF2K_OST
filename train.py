@@ -13,7 +13,14 @@ import config
 from data_processing import SRDataset
 from models import Discriminator, Generator, TruncatedVGG19
 from plots import plot_training_metrics
-from utils import Metrics, format_time, load_checkpoint, rgb_to_ycbcr, save_checkpoint
+from utils import (
+    Metrics,
+    create_hyperparameters_str,
+    format_time,
+    load_checkpoint,
+    rgb_to_ycbcr,
+    save_checkpoint,
+)
 
 logger = config.create_logger("INFO", __file__)
 
@@ -180,10 +187,31 @@ def train(
     else:
         best_val_loss = float("inf")
 
-    logger.info("-" * 107)
+    dashes_count = 54
+
+    logger.info("-" * dashes_count)
     logger.info("Model parameters:")
     logger.info(f"Scaling factor: {config.SCALING_FACTOR}")
-    logger.info("-" * 107)
+    logger.info(f"Crop size: {config.CROP_SIZE}")
+    logger.info(f"Batch size: {config.TRAIN_BATCH_SIZE}")
+    logger.info(f"Learning rate: {config.LEARNING_RATE}")
+    logger.info(f"Epochs: {config.EPOCHS}")
+    logger.info(f"Number of workers: {config.NUM_WORKERS}")
+    logger.info("-" * dashes_count)
+    logger.info("Generator:")
+    logger.info(f"Count of channels: {config.GENERATOR_CHANNELS_COUNT}")
+    logger.info(f"Count of residual blocks: {config.GENERATOR_RES_BLOCKS_COUNT}")
+    logger.info(f"Large kernel size: {config.GENERATOR_LARGE_KERNEL_SIZE}")
+    logger.info(f"Small kernel size: {config.GENERATOR_SMALL_KERNEL_SIZE}")
+    logger.info("-" * dashes_count)
+    logger.info("Discriminator:")
+    logger.info(f"Count of channels: {config.DISCRIMINATOR_CHANNELS_COUNT}")
+    logger.info(f"Count of Conv blocks: {config.DISCRIMINATOR_CONV_BLOCKS_COUNT}")
+    logger.info(
+        f"Size of the first linear layer: {config.DISCRIMINATOR_LINEAR_LAYER_SIZE}"
+    )
+    logger.info(f"Kernel size: {config.DISCRIMINATOR_KERNEL_SIZE}")
+    logger.info("-" * dashes_count)
     logger.info("Starting model training...")
 
     try:
@@ -279,7 +307,7 @@ def train(
                 discriminator_scheduler=discriminator_scheduler,
             )
 
-        plot_training_metrics(metrics, "")
+        plot_training_metrics(metrics, create_hyperparameters_str())
 
     except KeyboardInterrupt:
         logger.info("Saving model's weights and finish training...")
@@ -297,6 +325,8 @@ def train(
             discriminator_scheduler=discriminator_scheduler,
         )
 
+        plot_training_metrics(metrics, create_hyperparameters_str())
+
 
 def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -305,14 +335,14 @@ def main() -> None:
         data_path=config.TRAIN_DATASET_PATH,
         scaling_factor=config.SCALING_FACTOR,
         crop_size=config.CROP_SIZE,
-        dev_mode=config.DEV_MOVE,
+        dev_mode=config.DEV_MODE,
     )
 
     val_dataset = SRDataset(
         data_path=config.VAL_DATASET_PATH,
         scaling_factor=config.SCALING_FACTOR,
         crop_size=config.CROP_SIZE,
-        dev_mode=config.DEV_MOVE,
+        dev_mode=config.DEV_MODE,
     )
 
     train_data_loader = DataLoader(

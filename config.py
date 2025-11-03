@@ -1,8 +1,8 @@
 import logging
 import sys
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from datetime import datetime
 from typing import Literal
 
 SCALING_FACTOR: Literal[2, 4, 8] = 4
@@ -20,15 +20,14 @@ DISCRIMINATOR_LINEAR_LAYER_SIZE = 1024
 
 TRAIN_BATCH_SIZE = 32
 TEST_BATCH_SIZE = 1
-LEARNING_RATE = 1e-5
-MAX_LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-4
 EPOCHS = 500
 PRINT_FREQUENCY = 200
 
-INITIALIZE_WITH_SRRESNET_CHECKPOINT = True
-LOAD_CHECKPOINT = False
+INITIALIZE_WITH_SRRESNET_CHECKPOINT = False
+LOAD_CHECKPOINT = True
 LOAD_BEST_CHECKPOINT = False
-DEV_MOVE = True
+DEV_MODE = False
 
 SCHEDULER_MILESTONES = [EPOCHS // 2]
 SCHEDULER_GAMMA = 0.5
@@ -50,6 +49,10 @@ SRRESNET_MODEL_CHECKPOINT_PATH = Path(
 )
 BEST_CHECKPOINT_DIR_PATH = Path("checkpoints/srgan_best")
 CHECKPOINT_DIR_PATH = Path("checkpoints/srgan_latest")
+
+INFERENCE_INPUT_PATH = Path("images/inference_img_1.jpg")
+INFERENCE_OUTPUT_PATH = Path("images/sr_img_1.png")
+INFERECE_COMPARISON_IMAGE_PATH = Path("images/comparison_img_1.png")
 
 
 def create_logger(
