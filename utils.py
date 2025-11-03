@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal, overload
 
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from safetensors.torch import load_file, save_file
 from torch import Tensor, nn, optim
 from torch.amp import GradScaler
@@ -165,6 +165,102 @@ def convert_img(
         img.squeeze_(0)
 
     return img
+
+
+def compare_imgs(
+    lr_img_tensor: Tensor,
+    sr_img_tensor: Tensor,
+    output_path: str | Path,
+    hr_img_tensor: Tensor | None = None,
+    scaling_factor: Literal[2, 4, 8] = 4,
+    orientation: Literal["horizontal", "vertical"] = "vertical",
+) -> None:
+    bicubic_label = "Bicubic"
+    sr_label = "SRGAN"
+    hr_label = "Original"
+
+    lr_img = convert_img(lr_img_tensor, "[-1, 1]", "pil")
+    sr_img = convert_img(sr_img_tensor, "[-1, 1]", "pil")
+
+    bicubic_img = transforms.Resize(
+        size=(sr_img_tensor.shape[2], sr_img_tensor.shape[3]),
+        interpolation=transforms.InterpolationMode.BICUBIC,
+    )(lr_img)
+
+    width, height = sr_img.size
+
+    if orientation == "horizontal" and isinstance(hr_img_tensor, Tensor):
+        hr_img = convert_img(hr_img_tensor, "[-1, 1]", "pil")
+
+        total_width = width * 3 + 50
+        total_height = height
+
+        comparison_img = Image.new("RGB", (total_width, total_height), color="white")
+
+        comparison_img.paste(bicubic_img, (0, 50))
+        comparison_img.paste(sr_img, (width + 25, 50))
+        comparison_img.paste(hr_img, (width * 2 + 50, 50))
+    else:
+        total_width = width
+        total_height = height * 2 + 100
+
+        comparison_img = Image.new("RGB", (total_width, total_height), color="white")
+
+        comparison_img.paste(bicubic_img, (0, 50))
+        comparison_img.paste(sr_img, (0, height + 100))
+
+    draw = ImageDraw.Draw((comparison_img))
+
+    try:
+        font = ImageFont.truetype(
+            "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf", size=36
+        )
+    except OSError:
+        font = ImageFont.load_default()
+
+    bicubic_text_width = draw.textlength(bicubic_label, font=font)
+    sr_text_width = draw.textlength(sr_label, font=font)
+    hr_text_width = draw.textlength(hr_label, font=font)
+
+    if orientation == "horizontal":
+        draw.text(
+            ((width - bicubic_text_width) / 2, 5),
+            bicubic_label,
+            fill="black",
+            font=font,
+        )
+
+        draw.text(
+            ((width - sr_text_width) / 2 + width + 25, 5),
+            sr_label,
+            fill="black",
+            font=font,
+        )
+
+        draw.text(
+            ((width - hr_text_width) / 2 + width * 2 + 50, 5),
+            hr_label,
+            fill="black",
+            font=font,
+        )
+    else:
+        draw.text(
+            ((width - bicubic_text_width) / 2, 5),
+            bicubic_label,
+            fill="black",
+            font=font,
+        )
+
+        draw.text(
+            ((width - sr_text_width) / 2, height + 55),
+            sr_label,
+            fill="black",
+            font=font,
+        )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    comparison_img.save(output_path, format="PNG")
 
 
 def _save_optimizer_state(
