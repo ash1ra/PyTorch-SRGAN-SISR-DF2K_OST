@@ -15,6 +15,7 @@ from models import Discriminator, Generator, TruncatedVGG19
 from plots import plot_training_metrics
 from utils import (
     Metrics,
+    convert_img,
     create_hyperparameters_str,
     format_time,
     load_checkpoint,
@@ -52,11 +53,15 @@ def train_step(
 
         with autocast(device, enabled=(generator_scaler is not None)):
             sr_img_tensor = generator(lr_img_tensor)
+            sr_img_tensor_normalized = convert_img(sr_img_tensor, "[-1, 1]", "imagenet")
+            hr_img_tensor_normalized = convert_img(hr_img_tensor, "[-1, 1]", "imagenet")
 
-            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor)
-            hr_img_tensor_in_vgg_space = truncated_vgg19(hr_img_tensor).detach()
+            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor_normalized)
+            hr_img_tensor_in_vgg_space = truncated_vgg19(
+                hr_img_tensor_normalized
+            ).detach()
 
-            sr_discriminated = discriminator(sr_img_tensor)
+            sr_discriminated = discriminator(sr_img_tensor_normalized)
 
             content_loss = content_loss_fn(
                 sr_img_tensor_in_vgg_space, hr_img_tensor_in_vgg_space
@@ -81,8 +86,8 @@ def train_step(
             generator_optimizer.step()
 
         with autocast(device, enabled=(discriminator_scaler is not None)):
-            hr_discriminated = discriminator(hr_img_tensor)
-            sr_discriminated = discriminator(sr_img_tensor.detach())
+            hr_discriminated = discriminator(hr_img_tensor_normalized)
+            sr_discriminated = discriminator(sr_img_tensor_normalized.detach())
 
             adversarial_loss = adversarial_loss_fn(
                 sr_discriminated, torch.zeros_like(sr_discriminated)
@@ -128,9 +133,11 @@ def validation_step(
             lr_img_tensor = lr_img_tensor.to(device, non_blocking=True)
 
             sr_img_tensor = generator(lr_img_tensor)
+            sr_img_tensor_normalized = convert_img(sr_img_tensor, "[-1, 1]", "imagenet")
+            hr_img_tensor_normalized = convert_img(hr_img_tensor, "[-1, 1]", "imagenet")
 
-            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor)
-            hr_img_tensor_in_vgg_space = truncated_vgg19(hr_img_tensor)
+            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor_normalized)
+            hr_img_tensor_in_vgg_space = truncated_vgg19(hr_img_tensor_normalized)
 
             content_loss = content_loss_fn(
                 sr_img_tensor_in_vgg_space, hr_img_tensor_in_vgg_space

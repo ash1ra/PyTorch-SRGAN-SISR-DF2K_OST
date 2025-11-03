@@ -97,6 +97,34 @@ def create_hr_and_lr_imgs(
     return hr_img_tensor, lr_img_tensor
 
 
+def convert_img(
+    img: Tensor,
+    source: Literal["[-1, 1]", "imagenet"],
+    target: Literal["[-1, 1]", "imagenet"],
+) -> Tensor:
+    imagenet_mean = [0.485, 0.456, 0.406]
+    imagenet_std = [0.229, 0.224, 0.225]
+
+    imagenet_mean_tensor = torch.tensor(imagenet_mean).view(1, 3, 1, 1).to(img.device)
+    imagenet_std_tensor = torch.tensor(imagenet_std).view(1, 3, 1, 1).to(img.device)
+
+    imagenet_norm_transform = transforms.Normalize(mean=imagenet_mean, std=imagenet_std)
+
+    match source:
+        case "[-1, 1]":
+            img = (img + 1.0) / 2.0
+        case "imagenet":
+            img = img * imagenet_std_tensor + imagenet_mean_tensor
+
+    match target:
+        case "[-1, 1]":
+            img = img * 2.0 - 1.0
+        case "imagenet":
+            img = imagenet_norm_transform(img)
+
+    return img
+
+
 def _save_optimizer_state(
     optimizer: optim.Optimizer,
     checkpoint_dir_path: str | Path,

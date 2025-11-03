@@ -8,7 +8,7 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 import config
 from data_processing import SRDataset
 from models import Generator, TruncatedVGG19
-from utils import load_checkpoint, rgb_to_ycbcr
+from utils import convert_img, load_checkpoint, rgb_to_ycbcr
 
 logger = config.create_logger("INFO", __file__)
 
@@ -32,9 +32,11 @@ def test_step(
             lr_img_tensor = lr_img_tensor.to(device, non_blocking=True)
 
             sr_img_tensor = generator(lr_img_tensor)
+            sr_img_tensor_normalized = convert_img(sr_img_tensor, "[-1, 1]", "imagenet")
+            hr_img_tensor_normalized = convert_img(hr_img_tensor, "[-1, 1]", "imagenet")
 
-            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor)
-            hr_img_tensor_in_vgg_space = truncated_vgg19(hr_img_tensor)
+            sr_img_tensor_in_vgg_space = truncated_vgg19(sr_img_tensor_normalized)
+            hr_img_tensor_in_vgg_space = truncated_vgg19(hr_img_tensor_normalized)
 
             content_loss = content_loss_fn(
                 sr_img_tensor_in_vgg_space, hr_img_tensor_in_vgg_space

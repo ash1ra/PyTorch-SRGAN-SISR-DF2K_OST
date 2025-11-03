@@ -3,7 +3,6 @@ from typing import Literal
 
 from torch import Tensor, nn
 from torchvision.models import VGG19_Weights, vgg19
-from torchvision.transforms import Normalize
 
 from config import create_logger
 
@@ -220,17 +219,12 @@ class TruncatedVGG19(nn.Module):
         vgg19_model = vgg19(weights=VGG19_Weights.DEFAULT)
 
         self.features = nn.Sequential(*list(vgg19_model.features.children())[:36])
-        self.normalization = Normalize(
-            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-        )
 
         self.features.eval()
         for param in self.features.parameters():
             param.requires_grad = False
 
     def forward(self, x: Tensor) -> Tensor:
-        x_rescaled = (x + 1.0) / 2.0
-        x_normilized = self.normalization(x_rescaled)
-        output = self.features(x_normilized)
+        output = self.features(x)
 
         return output
