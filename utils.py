@@ -1,9 +1,10 @@
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 
 import torch
+from PIL import Image
 from safetensors.torch import load_file, save_file
 from torch import Tensor, nn, optim
 from torch.amp import GradScaler
@@ -97,30 +98,71 @@ def create_hr_and_lr_imgs(
     return hr_img_tensor, lr_img_tensor
 
 
+@overload
 def convert_img(
     img: Tensor,
-    source: Literal["[-1, 1]", "imagenet"],
-    target: Literal["[-1, 1]", "imagenet"],
-) -> Tensor:
+    source: Literal["[-1, 1]", "[0, 1]", "imagenet"],
+    target: Literal["pil"],
+) -> Image.Image: ...
+
+
+@overload
+def convert_img(
+    img: Tensor,
+    source: Literal["[-1, 1]", "[0, 1]", "imagenet"],
+    target: Literal["[-1, 1]", "[0, 1]", "imagenet", "y-channel"],
+) -> Tensor: ...
+
+
+def convert_img(
+    img: Tensor,
+    source: Literal["[-1, 1]", "[0, 1]", "imagenet"],
+    target: Literal["[-1, 1]", "[0, 1]", "imagenet", "pil", "y-channel"],
+) -> Tensor | Image.Image:
+    if single_tensor := img.dim() == 3:
+        img.unsqueeze_(0)
+
     imagenet_mean = [0.485, 0.456, 0.406]
     imagenet_std = [0.229, 0.224, 0.225]
+    ycbcr_weights = [0.299, 0.587, 0.114]
 
-    imagenet_mean_tensor = torch.tensor(imagenet_mean).view(1, 3, 1, 1).to(img.device)
-    imagenet_std_tensor = torch.tensor(imagenet_std).view(1, 3, 1, 1).to(img.device)
+    imagenet_mean_tensor = torch.tensor(imagenet_mean, device=img.device).view(
+        1, 3, 1, 1
+    )
+    imagenet_std_tensor = torch.tensor(imagenet_std, device=img.device).view(1, 3, 1, 1)
+    ycbcr_weights_tensor = torch.tensor(ycbcr_weights, device=img.device).view(
+        1, 3, 1, 1
+    )
 
     imagenet_norm_transform = transforms.Normalize(mean=imagenet_mean, std=imagenet_std)
+    to_pil_img_transform = transforms.ToPILImage()
 
     match source:
+        case "[0, 1]":
+            pass
         case "[-1, 1]":
             img = (img + 1.0) / 2.0
         case "imagenet":
             img = img * imagenet_std_tensor + imagenet_mean_tensor
+        case _:
+            raise ValueError(f"Unknown source format: {source}")
 
     match target:
+        case "[0, 1]":
+            pass
         case "[-1, 1]":
             img = img * 2.0 - 1.0
         case "imagenet":
             img = imagenet_norm_transform(img)
+        case "pil":
+            img = to_pil_img_transform(img[0])
+        case "y_channel":
+            img = torch.sum(img * ycbcr_weights_tensor, dim=1, keepdim=True)
+        case _:
+            raise ValueError(f"Unknown target format: {target}")
+
+    if single_tensor and target != "pil":
+        img.squeeze_(0)
 
     return img
 
@@ -387,27 +429,6 @@ def format_time(total_seconds: float) -> str:
     seconds = int(total_seconds % 60)
 
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-
-def rgb_to_ycbcr(img_tensor: torch.Tensor) -> torch.Tensor:
-    if img_tensor.dim() == 4:
-        img_tensor.squeeze_(0)
-
-    img_tensor = (img_tensor + 1) / 2
-
-    weights = torch.tensor(
-        [0.299, 0.587, 0.114],
-        dtype=img_tensor.dtype,
-        device=img_tensor.device,
-    )
-
-    Y_channel = torch.sum(
-        img_tensor * weights.view(1, 3, 1, 1),
-        dim=1,
-        keepdim=True,
-    )
-
-    return Y_channel
 
 
 def create_hyperparameters_str() -> str:

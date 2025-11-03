@@ -8,7 +8,7 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 import config
 from data_processing import SRDataset
 from models import Generator, TruncatedVGG19
-from utils import convert_img, load_checkpoint, rgb_to_ycbcr
+from utils import convert_img, load_checkpoint
 
 logger = config.create_logger("INFO", __file__)
 
@@ -42,8 +42,8 @@ def test_step(
                 sr_img_tensor_in_vgg_space, hr_img_tensor_in_vgg_space
             )
 
-            y_hr_tensor = rgb_to_ycbcr(hr_img_tensor)
-            y_sr_tensor = rgb_to_ycbcr(sr_img_tensor)
+            y_hr_tensor = convert_img(hr_img_tensor, "[-1, 1]", "y-channel")
+            y_sr_tensor = convert_img(sr_img_tensor, "[-1, 1]", "y-channel")
 
             sf = config.SCALING_FACTOR
             y_hr_tensor = y_hr_tensor[:, :, sf:-sf, sf:-sf]

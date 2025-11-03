@@ -19,7 +19,6 @@ from utils import (
     create_hyperparameters_str,
     format_time,
     load_checkpoint,
-    rgb_to_ycbcr,
     save_checkpoint,
 )
 
@@ -143,8 +142,8 @@ def validation_step(
                 sr_img_tensor_in_vgg_space, hr_img_tensor_in_vgg_space
             )
 
-            y_hr_tensor = rgb_to_ycbcr(hr_img_tensor)
-            y_sr_tensor = rgb_to_ycbcr(sr_img_tensor)
+            y_hr_tensor = convert_img(hr_img_tensor, "[-1, 1]", "y-channel")
+            y_sr_tensor = convert_img(sr_img_tensor, "[-1, 1]", "y-channel")
 
             sf = config.SCALING_FACTOR
             y_hr_tensor = y_hr_tensor[:, :, sf:-sf, sf:-sf]
