@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torchvision.io import decode_image
 from torchvision.transforms import v2 as transforms
 
-from config import create_logger
+import config
 
 
 @dataclass
@@ -26,7 +26,7 @@ class Metrics:
     generator_val_ssims: list[float] = field(default_factory=list)
 
 
-logger = create_logger("INFO", __file__)
+logger = config.create_logger("INFO", __file__)
 
 
 def create_hr_and_lr_imgs(
@@ -380,3 +380,7 @@ def rgb_to_ycbcr(img_tensor: torch.Tensor) -> torch.Tensor:
     )
 
     return Y_channel
+
+
+def create_hyperparameters_str() -> str:
+    return f"Scaling factor: {config.SCALING_FACTOR} | Crop size: {config.CROP_SIZE} | Batch size: {config.TRAIN_BATCH_SIZE} | Learning rate: {config.LEARNING_RATE} | Epochs: {config.EPOCHS} | Number of workers: {config.NUM_WORKERS} | Dev mode: {config.DEV_MODE}"
