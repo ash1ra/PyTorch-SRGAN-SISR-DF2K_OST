@@ -156,7 +156,7 @@ def convert_img(
             img = imagenet_norm_transform(img)
         case "pil":
             img = to_pil_img_transform(img[0])
-        case "y_channel":
+        case "y-channel":
             img = torch.sum(img * ycbcr_weights_tensor, dim=1, keepdim=True)
         case _:
             raise ValueError(f"Unknown target format: {target}")
