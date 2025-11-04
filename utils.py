@@ -104,7 +104,7 @@ def create_hr_and_lr_imgs(
 @overload
 def convert_img(
     img: Tensor,
-    source: Literal["[-1, 1]", "[0, 1]", "imagenet"],
+    source: Literal["[-1, 1]", "[0, 1]", "imagenet", "uint8"],
     target: Literal["pil"],
 ) -> Image.Image: ...
 
@@ -112,15 +112,15 @@ def convert_img(
 @overload
 def convert_img(
     img: Tensor,
-    source: Literal["[-1, 1]", "[0, 1]", "imagenet"],
-    target: Literal["[-1, 1]", "[0, 1]", "imagenet", "y-channel"],
+    source: Literal["[-1, 1]", "[0, 1]", "imagenet", "uint8"],
+    target: Literal["[-1, 1]", "[0, 1]", "imagenet", "uint8", "y-channel"],
 ) -> Tensor: ...
 
 
 def convert_img(
     img: Tensor,
-    source: Literal["[-1, 1]", "[0, 1]", "imagenet"],
-    target: Literal["[-1, 1]", "[0, 1]", "imagenet", "pil", "y-channel"],
+    source: Literal["[-1, 1]", "[0, 1]", "imagenet", "uint8"],
+    target: Literal["[-1, 1]", "[0, 1]", "imagenet", "uint8", "pil", "y-channel"],
 ) -> Tensor | Image.Image:
     if single_tensor := img.dim() == 3:
         img.unsqueeze_(0)
@@ -147,6 +147,8 @@ def convert_img(
             img = (img + 1.0) / 2.0
         case "imagenet":
             img = img * imagenet_std_tensor + imagenet_mean_tensor
+        case "uint8":
+            img = img.to(torch.float32) / 255.0
         case _:
             raise ValueError(f"Unknown source format: {source}")
 
@@ -157,6 +159,8 @@ def convert_img(
             img = img * 2.0 - 1.0
         case "imagenet":
             img = imagenet_norm_transform(img)
+        case "uint8":
+            img = (img.clamp(0.0, 1.0) * 255.0).to(torch.uint8)
         case "pil":
             img = to_pil_img_transform(img[0])
         case "y-channel":
