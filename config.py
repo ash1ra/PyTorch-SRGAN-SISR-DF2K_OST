@@ -40,7 +40,7 @@ TILE_OVERLAP = 64
 
 TRAIN_DATASET_PATH = Path("data/DF2K_OST.txt")
 VAL_DATASET_PATH = Path("data/DIV2K_valid.txt")
-TEST_DATASETS_PATHES = [
+TEST_DATASETS_PATHS = [
     Path("data/Set5.txt"),
     Path("data/Set14.txt"),
     Path("data/BSDS100.txt"),

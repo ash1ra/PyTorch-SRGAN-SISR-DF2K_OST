@@ -88,7 +88,7 @@ def main() -> None:
         test_mode=True,
     )
 
-    for dataset_path in config.TEST_DATASETS_PATHES:
+    for dataset_path in config.TEST_DATASETS_PATHS:
         dataset = SRDataset(
             data_path=dataset_path,
             scaling_factor=config.SCALING_FACTOR,
