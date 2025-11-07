@@ -12,13 +12,13 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 import config
 from data_processing import SRDataset
 from models import Discriminator, Generator, TruncatedVGG19
-from plots import plot_training_metrics
 from utils import (
     Metrics,
     convert_img,
     create_hyperparameters_str,
     format_time,
     load_checkpoint,
+    plot_training_metrics,
     save_checkpoint,
 )
 
